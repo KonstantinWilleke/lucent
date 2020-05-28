@@ -132,6 +132,14 @@ def channel(layer, n_channel, batch=None):
     return inner
 
 
+@wrap_objective()
+def output_neuron(unit_index, data_key=None, batch=None):
+    """Visualize a single output neuron"""
+    def inner(model):
+        return -model(data_key=data_key, unit_index=unit_index)
+    return inner
+
+
 def _torch_blur(tensor, out_c=3):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     depth = tensor.shape[1]
