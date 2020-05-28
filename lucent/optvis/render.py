@@ -20,6 +20,7 @@ import numpy as np
 from tqdm import tqdm
 from PIL import Image
 import torch
+from functools import partial
 
 from lucent.optvis import objectives, transform, param
 from lucent.misc.io import show
@@ -29,7 +30,7 @@ from .transform import normalize
 def render_vis(model, objective_f, param_f=None, optimizer=None, transforms=None,
                thresholds=(1024,), verbose=False, preprocess=True, progress=True,
                show_image=True, save_image=False, image_name=None, show_inline=False,
-               data_key=None):
+               data_key=None, odd_image=False):
     if param_f is None:
         param_f = lambda: param.image(128)
     # param_f is a function that should return two things
@@ -54,7 +55,7 @@ def render_vis(model, objective_f, param_f=None, optimizer=None, transforms=None
     # if image_shape[2] < 224 or image_shape[3] < 224:
     # transforms.append(torch.nn.Upsample(size=224, mode='bilinear', align_corners=True))
     transform_f = transform.compose(transforms)
-    hook = hook_model(model, image_f)
+    hook = hook_model(model, image_f, odd_image=odd_image)
     objective_f = objectives.as_objective(objective_f)
     if verbose:
         model(transform_f(image_f()))
@@ -64,7 +65,11 @@ def render_vis(model, objective_f, param_f=None, optimizer=None, transforms=None
     try:
         for i in tqdm(range(1, max(thresholds) + 1), disable=(not progress)):
             optimizer.zero_grad()
-            model(transform_f(image_f()), data_key=data_key)
+            if data_key is None:
+                model(transform_f(image_f()))
+            else:
+                model(transform_f(image_f()), data_key=data_key) if odd_image is False else \
+                    model(transform_f(image_f()[:,:,:-1,:-1]), data_key=data_key)
             loss = objective_f(hook)
             loss.backward()
             optimizer.step()
@@ -130,7 +135,7 @@ class ModuleHook():
         self.hook.remove()
 
 
-def hook_model(model, image_f):
+def hook_model(model, image_f, odd_image=None):
     features = OrderedDict()
     # recursive hooking function
 
@@ -144,10 +149,13 @@ def hook_model(model, image_f):
                 hook_layers(layer, prefix=prefix+[name])
     hook_layers(model)
 
-    def hook(layer):
+    def hook(layer=None, data_key=None, unit_index=None):
         if layer == "input":
             return image_f()
         if layer == "labels":
             return list(features.values())[-1].features
+        if layer is None:
+            return model(image_f()[:,:,:-1,:-1], data_key=data_key)[0, unit_index] if odd_image else \
+                model(image_f()[:,:,:-1,:-1], data_key=data_key)[0, unit_index]
         return features[layer].features
     return hook
